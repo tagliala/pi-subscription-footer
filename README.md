@@ -47,9 +47,13 @@ Then `/reload`.
 | Trigger | When |
 |---|---|
 | start of a session | immediately on start and on `/reload` |
-| start of a run | at `agent_start`, at most once a minute |
-| model switch | at `model_select`, at most once a minute |
-| timer | every 5 minutes |
+| start of a run | at `agent_start`, immediately if two minutes have passed since the last lookup, otherwise scheduled for that mark |
+| model switch | same rule at `model_select` |
+| timer | after 15 minutes without a lookup |
+
+A run or model switch triggers a lookup within two minutes even if it occurs
+just after the previous one. Activity resets the idle timer, so it never
+causes an unnecessary lookup immediately afterward.
 
 Once shown, the footer line stays in place to avoid shifting the transcript.
 Failed lookups or rejected credentials remove their stale values; if no provider
@@ -92,7 +96,7 @@ The suite covers the pure parsing and formatting helpers in
 `extensions/subscription-status.ts` plus the event wiring: which providers are
 rendered, that a free plan is hidden, that stale values are replaced without
 clearing the status line, that the network is untouched outside the TUI,
-and that event-driven refreshes are throttled.
+and that active and idle refreshes are scheduled independently.
 
 ## Publishing
 

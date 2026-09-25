@@ -20,8 +20,8 @@ export const STATUS_KEY = "subscription";
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 export const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 
-const REFRESH_INTERVAL_MS = 5 * 60_000;
-const MIN_REFRESH_MS = 60_000;
+const REFRESH_INTERVAL_MS = 15 * 60_000;
+const MIN_REFRESH_MS = 2 * 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const DAY_SECONDS = 24 * 60 * 60;
@@ -253,17 +253,35 @@ export async function deepseekPart(): Promise<string | null> {
 }
 
 export default function register(pi: ExtensionAPI) {
-  type Interval = ReturnType<typeof setInterval> & { unref?: () => void };
-  let timer: Interval | null = null;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let activityTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFetchedAt = 0;
   let lastText = "";
   let refreshing = false;
   let stopped = false;
 
+  function clearTimers(): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (activityTimer) clearTimeout(activityTimer);
+    idleTimer = null;
+    activityTimer = null;
+  }
+
+  function scheduleIdleRefresh(ctx: ExtensionContext): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      void refresh(ctx);
+    }, REFRESH_INTERVAL_MS);
+    idleTimer.unref?.();
+  }
+
   async function refresh(ctx: ExtensionContext, force = false): Promise<void> {
     if (ctx.mode !== "tui" || stopped || refreshing) return;
     if (!force && Date.now() - lastFetchedAt < MIN_REFRESH_MS) return;
 
+    if (activityTimer) clearTimeout(activityTimer);
+    activityTimer = null;
     refreshing = true;
     try {
       const [chatgpt, deepseek] = await Promise.all([chatgptPart(), deepseekPart()]);
@@ -281,29 +299,39 @@ export default function register(pi: ExtensionAPI) {
       // A usage lookup must never break the session.
     } finally {
       refreshing = false;
+      if (!stopped) scheduleIdleRefresh(ctx);
     }
+  }
+
+  function refreshOnActivity(ctx: ExtensionContext): void {
+    if (ctx.mode !== "tui" || stopped || refreshing || activityTimer) return;
+    const wait = MIN_REFRESH_MS - (Date.now() - lastFetchedAt);
+    if (wait <= 0) {
+      void refresh(ctx);
+      return;
+    }
+    // An event during the cooldown still gets a refresh at the two-minute mark.
+    activityTimer = setTimeout(() => {
+      activityTimer = null;
+      void refresh(ctx);
+    }, wait);
+    activityTimer.unref?.();
   }
 
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     stopped = false;
-    if (timer) clearInterval(timer);
+    clearTimers();
     void refresh(ctx, true);
-    timer = setInterval(() => void refresh(ctx), REFRESH_INTERVAL_MS) as Interval;
-    // The refresh timer must never keep the process alive on its own.
-    timer.unref?.();
   });
 
   // Refresh at the start of a run, not at agent_end: writing the status while
   // the final frame is being drawn resizes the footer and leaves blank rows.
-  pi.on("agent_start", (_event, ctx) => void refresh(ctx));
-  pi.on("model_select", (_event, ctx) => void refresh(ctx));
+  pi.on("agent_start", (_event, ctx) => refreshOnActivity(ctx));
+  pi.on("model_select", (_event, ctx) => refreshOnActivity(ctx));
 
   pi.on("session_shutdown", () => {
     stopped = true;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
+    clearTimers();
   });
 }

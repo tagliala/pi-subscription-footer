@@ -285,7 +285,7 @@ test("does not touch the network outside the TUI", async () => {
   assert.equal(statuses.length, 0);
 });
 
-test("throttles event-driven refreshes to one round per minute", async () => {
+test("throttles event-driven refreshes to one round every two minutes", async () => {
   writeAuth({ ...codexCredentials(), ...deepseekCredential() });
   const calls = stubFetch([{ body: codexBody }, { body: deepseekBody }]);
   const pi = fakePi();
@@ -299,6 +299,81 @@ test("throttles event-driven refreshes to one round per minute", async () => {
   await flush();
 
   assert.equal(calls.length, 2);
+});
+
+test("schedules a skipped activity refresh at the two-minute mark, only once", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date(1_000_000_000_000) });
+  try {
+    writeAuth({ ...codexCredentials(), ...deepseekCredential() });
+    const calls = stubFetch([{ body: codexBody }, { body: deepseekBody }]);
+    const pi = fakePi();
+    const { ctx } = fakeCtx();
+    register(pi as never);
+
+    pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(30_000);
+    pi.handlers.get("agent_start")!({ type: "agent_start" }, ctx);
+    pi.handlers.get("model_select")!({ type: "model_select" }, ctx);
+    t.mock.timers.tick(90_000 - 1);
+    assert.equal(calls.length, 2);
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 4);
+    pi.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test("polls after fifteen idle minutes counted from the last lookup", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date(1_000_000_000_000) });
+  try {
+    writeAuth({ ...codexCredentials(), ...deepseekCredential() });
+    const calls = stubFetch([{ body: codexBody }, { body: deepseekBody }]);
+    const pi = fakePi();
+    const { ctx } = fakeCtx();
+    register(pi as never);
+
+    pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(2 * 60_000);
+    pi.handlers.get("agent_start")!({ type: "agent_start" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 4);
+    t.mock.timers.tick(15 * 60_000 - 1);
+    assert.equal(calls.length, 4);
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 6);
+    t.mock.timers.tick(15 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 8);
+    pi.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test("cancels a scheduled activity refresh on shutdown", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date(1_000_000_000_000) });
+  try {
+    writeAuth({ ...codexCredentials(), ...deepseekCredential() });
+    const calls = stubFetch([{ body: codexBody }, { body: deepseekBody }]);
+    const pi = fakePi();
+    const { ctx } = fakeCtx();
+    register(pi as never);
+
+    pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    pi.handlers.get("agent_start")!({ type: "agent_start" }, ctx);
+    pi.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+    t.mock.timers.tick(16 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 2);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("stops refreshing after session shutdown", async () => {

@@ -1,0 +1,41 @@
+{
+  "name": "pi-subscription-footer",
+  "version": "0.1.0",
+  "description": "ChatGPT subscription quota and DeepSeek balance in pi's footer",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "usage",
+    "quota",
+    "subscription",
+    "chatgpt",
+    "codex",
+    "deepseek",
+    "footer"
+  ],
+  "license": "MIT",
+  "author": "Geremia Taglialatela",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tagliala/pi-subscription-footer.git"
+  },
+  "homepage": "https://github.com/tagliala/pi-subscription-footer",
+  "bugs": {
+    "url": "https://github.com/tagliala/pi-subscription-footer/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/subscription-status.ts"
+    ]
+  },
+  "files": [
+    "extensions"
+  ]
+}

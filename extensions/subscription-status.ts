@@ -87,6 +87,13 @@ export function splitCodexWindows(rateLimit: RateLimit | null | undefined): {
   return { rolling, weekly };
 }
 
+function rollingWindowLabel(seconds: number | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return "rolling";
+  if (seconds >= DAY_SECONDS && seconds % DAY_SECONDS === 0) return `${seconds / DAY_SECONDS}d`;
+  if (seconds >= 3600 && seconds % 3600 === 0) return `${seconds / 3600}h`;
+  return `${Math.max(1, Math.ceil(seconds / 60))}m`;
+}
+
 export function codexWindowPart(
   name: string,
   window: RateWindow | null,
@@ -95,9 +102,9 @@ export function codexWindowPart(
   if (!window || typeof window.used_percent !== "number" || !Number.isFinite(window.used_percent)) {
     return null;
   }
-  const used = Math.min(100, Math.max(0, window.used_percent));
+  const remaining = 100 - Math.min(100, Math.max(0, window.used_percent));
   const resets = formatResetsIn(window, nowMs);
-  return `${name} ${Math.round(used)}%${resets ? ` ${resets}` : ""}`;
+  return `${name} ${Math.round(remaining)}%${resets ? ` ${resets}` : ""}`;
 }
 
 /**
@@ -116,7 +123,7 @@ export function parseChatgptUsage(body: unknown, nowMs: number = Date.now()): st
 
   const { rolling, weekly } = splitCodexWindows(payload?.rate_limit);
   const parts = [
-    codexWindowPart("5h", rolling, nowMs),
+    codexWindowPart(rollingWindowLabel(rolling?.limit_window_seconds), rolling, nowMs),
     codexWindowPart("wk", weekly, nowMs),
   ].filter((part): part is string => part !== null);
   if (parts.length === 0) return null;
@@ -136,21 +143,27 @@ export function parseDeepseekBalance(body: unknown): string | null {
     balance_infos?: Array<{ currency?: unknown; total_balance?: unknown }>;
   } | null;
 
-  const info = Array.isArray(payload?.balance_infos) ? payload.balance_infos[0] : undefined;
-  if (!info) return null;
   if (payload?.is_available === false) return "DeepSeek ⚠ unavailable";
-
-  const symbol =
-    info.currency === "USD"
-      ? "$"
-      : info.currency === "CNY"
-        ? "¥"
-        : info.currency
-          ? `${String(info.currency)} `
-          : "";
-  const amount = Number(info.total_balance);
-  if (!Number.isFinite(amount)) return null;
-  return `DeepSeek ${symbol}${amount.toFixed(2)}`;
+  const balances = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
+  const parts = balances.flatMap((info) => {
+    if (!info || (typeof info.total_balance !== "string" && typeof info.total_balance !== "number")) {
+      return [];
+    }
+    const amount = Number(info.total_balance);
+    if (!Number.isFinite(amount) || (typeof info.total_balance === "string" && !info.total_balance.trim())) {
+      return [];
+    }
+    const symbol =
+      info.currency === "USD"
+        ? "$"
+        : info.currency === "CNY"
+          ? "¥"
+          : typeof info.currency === "string" && info.currency
+            ? `${info.currency} `
+            : "";
+    return [`${symbol}${amount.toFixed(2)}`];
+  });
+  return parts.length ? `DeepSeek ${parts.join(" · ")}` : null;
 }
 
 export function agentDir(): string {
@@ -161,7 +174,10 @@ function readAuth(): Record<string, unknown> {
   const path = join(agentDir(), "auth.json");
   if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const auth: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return auth && typeof auth === "object" && !Array.isArray(auth)
+      ? auth as Record<string, unknown>
+      : {};
   } catch {
     return {};
   }
@@ -197,13 +213,12 @@ async function getJson(
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { headers, signal: controller.signal });
-    let body: unknown;
+    if (res.status !== 200) return { status: res.status, body: undefined };
     try {
-      body = await res.json();
+      return { status: res.status, body: await res.json() };
     } catch {
-      body = undefined;
+      return { status: res.status, body: undefined };
     }
-    return { status: res.status, body };
   } catch {
     return null;
   } finally {
@@ -255,10 +270,10 @@ export default function register(pi: ExtensionAPI) {
       lastFetchedAt = Date.now();
       if (stopped) return;
       const parts = [chatgpt, deepseek].filter((part): part is string => part !== null);
-      // Never remove an existing line: a footer that changes height shifts the
-      // whole transcript and leaves blank rows behind.
-      if (parts.length === 0) return;
-      const text = ctx.ui.theme.fg("dim", parts.join("  "));
+      // Keep the row but never show unverified values after credentials or data disappear.
+      if (parts.length === 0 && !lastText) return;
+      const content = parts.length ? parts.join("  ") : "Subscription data unavailable";
+      const text = ctx.ui.theme.fg("dim", content);
       if (text === lastText) return;
       lastText = text;
       ctx.ui.setStatus(STATUS_KEY, text);

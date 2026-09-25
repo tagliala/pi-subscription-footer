@@ -1,6 +1,6 @@
 {
   "name": "pi-subscription-footer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ChatGPT subscription quota and DeepSeek balance in pi's footer",
   "type": "module",
   "keywords": [

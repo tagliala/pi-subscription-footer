@@ -59,11 +59,13 @@ test("splitCodexWindows treats a lone window without metadata as weekly", () => 
   assert.equal(weekly?.used_percent, 30);
 });
 
-test("codexWindowPart clamps percentages and appends the reset", () => {
+test("codexWindowPart shows remaining quota, clamped to 0–100%, and the reset", () => {
   const now = 1_000_000_000_000;
-  assert.equal(codexWindowPart("5h", { used_percent: 12.4, reset_after_seconds: 3 * 3600 }, now), "5h 12% ↺3h");
-  assert.equal(codexWindowPart("wk", { used_percent: 150 }, now), "wk 100%");
-  assert.equal(codexWindowPart("wk", { used_percent: -5 }, now), "wk 0%");
+  assert.equal(codexWindowPart("5h", { used_percent: 12.4, reset_after_seconds: 3 * 3600 }, now), "5h 88% ↺3h");
+  assert.equal(codexWindowPart("wk", { used_percent: 150 }, now), "wk 0%");
+  assert.equal(codexWindowPart("wk", { used_percent: -5 }, now), "wk 100%");
+  assert.equal(codexWindowPart("wk", { used_percent: 0 }, now), "wk 100%");
+  assert.equal(codexWindowPart("wk", { used_percent: 100 }, now), "wk 0%");
   assert.equal(codexWindowPart("wk", null, now), null);
   assert.equal(codexWindowPart("wk", {} as never, now), null);
 });
@@ -84,7 +86,17 @@ test("parseChatgptUsage renders the weekly-only plan with banked resets", () => 
     },
     rate_limit_reset_credits: { available_count: 2 },
   };
-  assert.equal(parseChatgptUsage(body, now), "ChatGPT Pro Lite wk 51% ↺2d +2r");
+  assert.equal(parseChatgptUsage(body, now), "ChatGPT Pro Lite wk 49% ↺2d +2r");
+});
+
+test("parseChatgptUsage labels rolling windows with their actual duration", () => {
+  for (const [seconds, label] of [[3600, "1h"], [90 * 60, "90m"], [2 * 24 * 3600, "2d"]] as const) {
+    const body = {
+      plan_type: "plus",
+      rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: seconds } },
+    };
+    assert.equal(parseChatgptUsage(body), `ChatGPT Plus ${label} 80%`);
+  }
 });
 
 test("parseChatgptUsage renders both windows in order", () => {
@@ -96,7 +108,7 @@ test("parseChatgptUsage renders both windows in order", () => {
       secondary_window: { used_percent: 52, limit_window_seconds: WEEK, reset_after_seconds: 2 * 24 * 3600 },
     },
   };
-  assert.equal(parseChatgptUsage(body, now), "ChatGPT Plus 5h 12% ↺3h · wk 52% ↺2d");
+  assert.equal(parseChatgptUsage(body, now), "ChatGPT Plus 5h 88% ↺3h · wk 48% ↺2d");
 });
 
 test("parseChatgptUsage omits the grant suffix without banked resets", () => {
@@ -105,7 +117,7 @@ test("parseChatgptUsage omits the grant suffix without banked resets", () => {
     rate_limit: { primary_window: { used_percent: 5, limit_window_seconds: WEEK } },
     rate_limit_reset_credits: { available_count: 0 },
   };
-  assert.equal(parseChatgptUsage(body), "ChatGPT Pro wk 5%");
+  assert.equal(parseChatgptUsage(body), "ChatGPT Pro wk 95%");
 });
 
 test("parseChatgptUsage returns null when no window carries a percentage", () => {

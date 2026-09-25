@@ -35,6 +35,8 @@ function writeAuth(content: Record<string, unknown>): void {
   dirs.push(dir);
   writeFileSync(join(dir, "auth.json"), JSON.stringify(content));
   process.env.PI_CODING_AGENT_DIR = dir;
+  delete process.env.PI_DEEPSEEK_API_KEY;
+  delete process.env.DEEPSEEK_API_KEY;
 }
 
 function codexCredentials(): Record<string, unknown> {
@@ -120,7 +122,7 @@ test("renders both providers into one dim status line", async () => {
   assert.deepEqual(calls, [CODEX_USAGE_URL, DEEPSEEK_BALANCE_URL]);
   assert.equal(statuses.length, 1);
   assert.equal(statuses[0]!.key, STATUS_KEY);
-  assert.equal(statuses[0]!.text, "\u001b[2mChatGPT Pro Lite wk 51%  DeepSeek $5.27\u001b[0m");
+  assert.equal(statuses[0]!.text, "\u001b[2mChatGPT Pro Lite wk 49%  DeepSeek $5.27\u001b[0m");
   assert.deepEqual(colors, ["dim"]);
 });
 
@@ -152,6 +154,24 @@ test("keeps DeepSeek when the ChatGPT login is rejected", async () => {
   assert.equal(statuses[0]!.text, "\u001b[2mDeepSeek $5.27\u001b[0m");
 });
 
+test("skips decoding HTTP error bodies", async () => {
+  writeAuth(codexCredentials());
+  let decoded = false;
+  globalThis.fetch = (async () => ({
+    status: 401,
+    json: () => { decoded = true; return {}; },
+  })) as unknown as typeof fetch;
+  const pi = fakePi();
+  const { ctx, statuses } = fakeCtx();
+  register(pi as never);
+
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+
+  assert.equal(statuses.length, 0);
+  assert.equal(decoded, false);
+});
+
 test("never writes a status when no provider is available", async () => {
   writeAuth({});
   delete process.env.PI_DEEPSEEK_API_KEY;
@@ -167,7 +187,7 @@ test("never writes a status when no provider is available", async () => {
   assert.equal(statuses.length, 0);
 });
 
-test("never clears the status once it has a value", async () => {
+test("replaces stale values without removing the footer row", async () => {
   writeAuth({ ...codexCredentials(), ...deepseekCredential() });
   stubFetch([{ body: codexBody }, { body: deepseekBody }]);
   const pi = fakePi();
@@ -176,13 +196,78 @@ test("never clears the status once it has a value", async () => {
 
   await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
   await flush();
-  // A provider that disappears must not resize the footer.
-  stubFetch([{ body: {} }, { body: {} }]);
-  await pi.handlers.get("model_select")!({ type: "model_select" }, ctx);
+  stubFetch([{ status: 401 }, { status: 401 }]);
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
   await flush();
 
+  assert.equal(statuses.length, 2);
+  assert.equal(statuses[1]!.text, "\u001b[2mSubscription data unavailable\u001b[0m");
   assert.equal(statuses.filter((status) => status.text === undefined).length, 0);
-  assert.equal(statuses.length, 1);
+
+  stubFetch([{ body: codexBody }, { body: deepseekBody }]);
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+  assert.equal(statuses[2]!.text, statuses[0]!.text);
+});
+
+test("removes a rejected provider while retaining a valid one", async () => {
+  writeAuth({ ...codexCredentials(), ...deepseekCredential() });
+  stubFetch([{ body: codexBody }, { body: deepseekBody }]);
+  const pi = fakePi();
+  const { ctx, statuses } = fakeCtx();
+  register(pi as never);
+
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+  stubFetch([{ status: 401 }, { body: deepseekBody }]);
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+
+  assert.equal(statuses[1]!.text, "\u001b[2mDeepSeek $5.27\u001b[0m");
+});
+
+test("drops values after credentials are removed", async () => {
+  writeAuth(codexCredentials());
+  stubFetch([{ body: codexBody }]);
+  const pi = fakePi();
+  const { ctx, statuses } = fakeCtx();
+  register(pi as never);
+
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+  writeAuth({});
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+
+  assert.equal(statuses[1]!.text, "\u001b[2mSubscription data unavailable\u001b[0m");
+});
+
+test("ignores a malformed auth file without breaking the refresh", async () => {
+  writeAuth({});
+  writeFileSync(join(process.env.PI_CODING_AGENT_DIR!, "auth.json"), "null");
+  const calls = stubFetch([]);
+  const pi = fakePi();
+  const { ctx, statuses } = fakeCtx();
+  register(pi as never);
+
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+
+  assert.deepEqual(calls, []);
+  assert.equal(statuses.length, 0);
+});
+
+test("does not create a footer row when the first lookup fails", async () => {
+  writeAuth(codexCredentials());
+  stubFetch([{ status: 401 }]);
+  const pi = fakePi();
+  const { ctx, statuses } = fakeCtx();
+  register(pi as never);
+
+  await pi.handlers.get("session_start")!({ type: "session_start" }, ctx);
+  await flush();
+
+  assert.equal(statuses.length, 0);
 });
 
 test("does not touch the network outside the TUI", async () => {

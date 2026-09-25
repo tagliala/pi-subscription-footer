@@ -6,11 +6,13 @@ The line is added with `ctx.ui.setStatus()`, so it appears **below** pi's built-
 token/cost line rather than replacing the footer. It is wrapped in the footer's
 own `dim` colour, so it does not compete with the rest of the interface.
 
-![The footer showing a ChatGPT quota line and a DeepSeek balance](assets/footer.png)
+![Pi footer with an English prompt, ChatGPT quota and DeepSeek balances in two currencies](assets/footer.png)
+
+Example shown with fictitious account data in an isolated pi session.
 
 ```text
-↑139 ↓2 R7.4k CH98.2% $0.000 0.8%/1.0M (auto)         (deepseek) deepseek-flash • high
-ChatGPT Pro 5h 23% ↺2h · wk 41% ↺4d +1r DeepSeek $42.50
+0.0%/1.0M (auto)                                   (deepseek) deepseek-flash • high
+ChatGPT Pro 5h 77% ↺2h · wk 59% ↺4d +1r DeepSeek ¥0.00 · $42.50
 ```
 
 ## Install
@@ -25,18 +27,20 @@ Then `/reload`.
 
 | Provider | Source | Shown as |
 |---|---|---|
-| ChatGPT (Codex) | `GET https://chatgpt.com/backend-api/wham/usage` | `ChatGPT <plan> 5h 23% ↺2h · wk 41% ↺4d +1r` |
-| DeepSeek | `GET https://api.deepseek.com/user/balance` | `DeepSeek $42.50` |
+| ChatGPT (Codex) | `GET https://chatgpt.com/backend-api/wham/usage` | `ChatGPT <plan> 5h 77% ↺2h · wk 59% ↺4d +1r` |
+| DeepSeek | `GET https://api.deepseek.com/user/balance` | `DeepSeek $42.50` (or `DeepSeek ¥0.00 · $42.50` for multiple currencies) |
 
+- ChatGPT percentages show **quota remaining**, calculated as `100 − used_percent`
+  from the API, clamped to 0–100% (e.g. 23% used appears as 77% remaining).
+  DeepSeek shows the remaining prepaid balance (`total_balance`).
 - Only the quota windows the plan actually returns are shown: a rolling window
-  (`5h`) and/or the weekly window (`wk`). Plans with only a weekly window show a
-  single entry.
+  (labelled with its reported duration, e.g. `5h` or `90m`) and/or the weekly
+  window (`wk`). Plans with only a weekly window show a single entry.
 - `+1r` means a banked rate-limit reset is available.
-- The DeepSeek symbol follows the currency reported by the API, so USD accounts
-  show `$`, not `¥`.
-- **Nothing is shown when the account has no paid ChatGPT plan** (`plan_type`
-  is `free`) or when no credential is available. An absent provider is not an
-  error.
+- DeepSeek shows every valid currency balance returned by the API, with its
+  corresponding symbol (USD uses `$`, not `¥`).
+- **Nothing is shown on first load when neither provider returns displayable
+  data.** An absent provider is not an error.
 
 ## Refresh
 
@@ -47,9 +51,11 @@ Then `/reload`.
 | model switch | at `model_select`, at most once a minute |
 | timer | every 5 minutes |
 
-The footer line is never removed once it has a value, because a footer that
-changes height shifts the transcript. Lookups are never made outside the
-interactive TUI: `print`, `rpc` and `json` modes do not hit the network.
+Once shown, the footer line stays in place to avoid shifting the transcript.
+Failed lookups or rejected credentials remove their stale values; if no provider
+can be verified, the line reads `Subscription data unavailable`. Lookups are
+never made outside the interactive TUI: `print`, `rpc` and `json` modes do not
+hit the network.
 
 ## Credentials
 
@@ -70,8 +76,8 @@ The extension reads nothing else and writes nothing to disk.
   mode the footer is not anchored to the bottom of the screen, so after a run
   the reprinted footer can leave blank rows below it. This happens with or
   without this extension; `tuiMode: "fullscreen"` avoids it entirely.
-- A rejected or expired credential hides that provider instead of showing an
-  error. Re-run `/login openai-codex` to restore the ChatGPT entry.
+- A rejected or expired credential hides that provider's values. Re-run
+  `/login openai-codex` to restore the ChatGPT entry.
 
 ## Development
 
@@ -84,13 +90,14 @@ npm test
 
 The suite covers the pure parsing and formatting helpers in
 `extensions/subscription-status.ts` plus the event wiring: which providers are
-rendered, that a free plan is hidden, that a rejected login is hidden, that the
-status line is never cleared, that the network is untouched outside the TUI,
+rendered, that a free plan is hidden, that stale values are replaced without
+clearing the status line, that the network is untouched outside the TUI,
 and that event-driven refreshes are throttled.
 
 ## Publishing
 
-Releases are published to npm by hand from a clean checkout:
+Publishing to npm is manual and separate from GitHub releases; from a clean
+checkout:
 
 ```sh
 npm login
@@ -98,8 +105,10 @@ npm test
 npm publish --access public
 ```
 
-Update the version, commit, tag `v<version>`, and create a GitHub release. CI
-runs the tests on every push and pull request; it does not publish.
+Update the version, commit, tag `v<version>`, and create a GitHub release.
+GitHub-generated notes put PRs labelled `changelog` under **What's Changed**;
+all other PRs go under **Other Changes** (see `.github/release.yml`). CI runs
+the tests on every push and pull request; it does not publish.
 
 ## License
 

@@ -2,6 +2,7 @@
   "name": "pi-subscription-footer",
   "version": "0.1.0",
   "description": "ChatGPT subscription quota and DeepSeek balance in pi's footer",
+  "type": "module",
   "keywords": [
     "pi",
     "pi-package",
@@ -25,7 +26,10 @@
     "url": "https://github.com/tagliala/pi-subscription-footer/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -33,9 +37,11 @@
   "pi": {
     "extensions": [
       "./extensions/subscription-status.ts"
-    ]
+    ],
+    "image": "assets/footer.png"
   },
   "files": [
-    "extensions"
+    "extensions",
+    "assets"
   ]
 }

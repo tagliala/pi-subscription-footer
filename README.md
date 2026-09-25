@@ -1,15 +1,16 @@
 # pi-subscription-footer
 
-ChatGPT subscription quota and DeepSeek balance in [pi](https://pi.dev)'s own footer.
+ChatGPT subscription quota and DeepSeek prepaid balance in [pi](https://pi.dev)'s own footer.
 
 The line is added with `ctx.ui.setStatus()`, so it appears **below** pi's built-in
-token/cost line rather than replacing the footer. It uses the footer's own `dim`
-colour, so it does not compete with the rest of the interface.
+token/cost line rather than replacing the footer. It is wrapped in the footer's
+own `dim` colour, so it does not compete with the rest of the interface.
+
+![The footer showing a ChatGPT quota line and a DeepSeek balance](assets/footer.png)
 
 ```text
-~/dev/app (main)
-↑72k ↓53k R3.8M CH99.9% $0.108 12.1%/1.0M (auto)      (deepseek) deepseek-flash • high
-ChatGPT Pro Lite wk 52% ↺2d +2r DeepSeek $5.27
+↑139 ↓2 R7.4k CH98.2% $0.000 0.8%/1.0M (auto)         (deepseek) deepseek-flash • high
+ChatGPT Pro 5h 23% ↺2h · wk 41% ↺4d +1r DeepSeek $42.50
 ```
 
 ## Install
@@ -24,13 +25,13 @@ Then `/reload`.
 
 | Provider | Source | Shown as |
 |---|---|---|
-| ChatGPT (Codex) | `GET https://chatgpt.com/backend-api/wham/usage` | `ChatGPT <plan> 5h 12% ↺3h · wk 52% ↺2d +2r` |
-| DeepSeek | `GET https://api.deepseek.com/user/balance` | `DeepSeek $5.27` |
+| ChatGPT (Codex) | `GET https://chatgpt.com/backend-api/wham/usage` | `ChatGPT <plan> 5h 23% ↺2h · wk 41% ↺4d +1r` |
+| DeepSeek | `GET https://api.deepseek.com/user/balance` | `DeepSeek $42.50` |
 
 - Only the quota windows the plan actually returns are shown: a rolling window
   (`5h`) and/or the weekly window (`wk`). Plans with only a weekly window show a
   single entry.
-- `+2r` means two banked rate-limit resets are available.
+- `+1r` means a banked rate-limit reset is available.
 - The DeepSeek symbol follows the currency reported by the API, so USD accounts
   show `$`, not `¥`.
 - **Nothing is shown when the account has no paid ChatGPT plan** (`plan_type`
@@ -71,6 +72,34 @@ The extension reads nothing else and writes nothing to disk.
   without this extension; `tuiMode: "fullscreen"` avoids it entirely.
 - A rejected or expired credential hides that provider instead of showing an
   error. Re-run `/login openai-codex` to restore the ChatGPT entry.
+
+## Development
+
+Requires Node 24 or newer; the tests run TypeScript directly through Node's
+type stripping.
+
+```sh
+npm test
+```
+
+The suite covers the pure parsing and formatting helpers in
+`extensions/subscription-status.ts` plus the event wiring: which providers are
+rendered, that a free plan is hidden, that a rejected login is hidden, that the
+status line is never cleared, that the network is untouched outside the TUI,
+and that event-driven refreshes are throttled.
+
+## Publishing
+
+Releases are published to npm by hand from a clean checkout:
+
+```sh
+npm login
+npm test
+npm publish --access public
+```
+
+Update the version, commit, tag `v<version>`, and create a GitHub release. CI
+runs the tests on every push and pull request; it does not publish.
 
 ## License
 
